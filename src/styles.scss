@@ -1,0 +1,38 @@
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background-color:green; //#000;
+  color: #fff;
+  font-family: 'Beo', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+.beosound-container {
+  position: relative;
+  width: 1024px;
+  height: 768px;
+  background-color: #000;
+  overflow: hidden;
+  margin: 0 auto;
+}
+
+/* 
+  Dial: 480px diameter (240px radius).
+  Obscured area: 128px wide on the right edge of the screen.
+  Screen Width: 1024px.
+  The dial's edge should be at 1024 - 128 = 896px.
+  The dial's center should be at 896 + 240 = 1136px (outside the screen).
+  Center Y is 768 / 2 = 384px.
+*/
+.dial-obstruction {
+  position: absolute;
+  left: 896px; /* 1136 - 240 */
+  top: 144px;  /* 384 - 240 */
+  width: 480px;
+  height: 480px;
+  background-color: #1a1a1a;
+  border-radius: 50%;
+  z-index: 100;
+  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
