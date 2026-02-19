@@ -1,4 +1,4 @@
-import { Component, computed, inject, HostListener } from '@angular/core';
+import { Component, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { NavService } from './nav.service';
 
@@ -7,7 +7,7 @@ import { NavService } from './nav.service';
   standalone: true,
   imports: [CommonModule],
   template: `
-    <div class="nav-container" (wheel)="onWheel($event)">
+    <div class="nav-container">
       <!-- Background curve -->
       <svg class="nav-svg" viewBox="0 0 1024 768">
         <!-- Root Menu Orbital Arc (Flipped horizontally to bow towards items) -->
@@ -191,7 +191,7 @@ export class NavStackComponent {
 
   menuArcPath = computed(() => {
     // Flipped horizontally: Center is now to the LEFT of the items.
-    const cx = -900;
+    const cx = -800;
     const cy = 384;
     const radius = 1006; // Places arc at X=106
     const startAngle = -15 * (Math.PI / 180);
@@ -202,7 +202,7 @@ export class NavStackComponent {
     const x2 = cx + radius * Math.cos(endAngle);
     const y2 = cy + radius * Math.sin(endAngle);
     
-    return `M ${x1} ${y1} A ${radius} ${radius} 0 0 1 ${x2} ${y2}`;
+    return `M ${x1} ${y1} A ${radius} ${radius} 0 0 0 ${x2} ${y2}`;
   });
 
   getRootItemTransform(index: number) {
@@ -217,39 +217,5 @@ export class NavStackComponent {
     const angle = relativeIdx * this.angleStep;
     const radius = index === selectedIdx ? 320 : 280;
     return `rotate(${angle}deg) translateX(-${radius}px)`;
-  }
-
-  onWheel(event: WheelEvent) {
-    if (Math.abs(event.deltaY) > 5) {
-      this.navService.moveSelection(event.deltaY > 0 ? 1 : -1);
-    }
-    event.preventDefault();
-  }
-
-  @HostListener('window:keydown', ['$event'])
-  onKeyDown(event: KeyboardEvent) {
-    switch (event.key) {
-      case 'PageUp':
-        this.navService.moveRootSelection(-1);
-        break;
-      case 'PageDown':
-        this.navService.moveRootSelection(1);
-        break;
-      case 'ArrowUp':
-        this.navService.moveSelection(-1);
-        break;
-      case 'ArrowDown':
-        this.navService.moveSelection(1);
-        break;
-      case 'ArrowRight':
-      case 'Enter':
-        this.navService.navigateIn();
-        break;
-      case 'ArrowLeft':
-      case 'BackSpace':
-      case 'Escape':
-        this.navService.navigateOut();
-        break;
-    }
   }
 }

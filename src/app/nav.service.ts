@@ -1,4 +1,5 @@
-import { Injectable, signal, computed } from '@angular/core';
+import { Injectable, signal, computed, inject } from '@angular/core';
+import { BEO_MODULES, BeoModuleConfig } from './modules/module.config';
 
 export interface NavItem {
   id: string;
@@ -10,36 +11,8 @@ export interface NavItem {
   providedIn: 'root'
 })
 export class NavService {
-  public rootItems: NavItem[] = [
-    { id: 'playing', label: 'Playing' },
-    {
-      id: 'music',
-      label: 'Music',
-      children: [
-        { id: 'm-artists', label: 'Artists', children: [{ id: 'a1', label: 'Pink Floyd' }, { id: 'a2', label: 'Daft Punk' }] },
-        { id: 'm-albums', label: 'Albums', children: [{ id: 'al1', label: 'Dark Side of the Moon' }, { id: 'al2', label: 'Discovery' }] },
-        { id: 'm-genres', label: 'Genres', children: [{ id: 'g1', label: 'Rock' }, { id: 'g2', label: 'Electronic' }] }
-      ]
-    },
-    {
-      id: 'tv',
-      label: 'TV',
-      children: [
-        {
-          id: 'netflix',
-          label: 'Netflix',
-          children: [
-            { id: 'st', label: 'Stranger Things', children: [{ id: 'st1', label: 'S1:E1' }, { id: 'st2', label: 'S1:E2' }] },
-            { id: 'crown', label: 'The Crown', children: [{ id: 'c1', label: 'S1:E1' }] }
-          ]
-        },
-        { id: 'disney', label: 'Disney+', children: [] },
-        { id: 'prime', label: 'Prime Video', children: [] }
-      ]
-    },
-    { id: 'scenes', label: 'Scenes', children: [{ id: 's1', label: 'Relax' }, { id: 's2', label: 'Party' }, { id: 's3', label: 'Movie' }] },
-    { id: 'system', label: 'System' }
-  ];
+  private modules: BeoModuleConfig[] = inject(BEO_MODULES);
+  public rootItems: NavItem[] = [];
 
   // The index of the selected item in the root menu (left side)
   private rootSelectionIdx = signal<number>(1); // Default to 'Music'
@@ -56,16 +29,22 @@ export class NavService {
   public readonly navSelections = this.selectionStack.asReadonly();
 
   constructor() {
+    this.rootItems = this.modules.map(m => ({ id: m.id, label: m.label }));
     // Initialize stack with children of the default root selection
     this.updateStackFromRoot();
   }
 
-  private updateStackFromRoot() {
-    const rootItem = this.rootItems[this.rootSelectionIdx()];
-    if (rootItem.children) {
-      this.stack.set([rootItem.children]);
+  private async updateStackFromRoot() {
+    const rootModuleConfig = this.modules[this.rootSelectionIdx()];
+    const provider = await rootModuleConfig.load();
+    const children = await provider.getNavItems();
+    
+    if (children && children.length > 0) {
+      this.rootItems[this.rootSelectionIdx()].children = children;
+      this.stack.set([children]);
       this.selectionStack.set([0]);
     } else {
+      this.rootItems[this.rootSelectionIdx()].children = [];
       this.stack.set([]);
       this.selectionStack.set([]);
     }

@@ -1,6 +1,7 @@
-import { Component } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { NavStackComponent } from './nav-stack.component';
+import { InputService } from './input/input.service';
 
 @Component({
   selector: 'app-root',
@@ -29,4 +30,8 @@ import { NavStackComponent } from './nav-stack.component';
 })
 export class App {
   title = 'beosound5redux';
+  
+  constructor() {
+    inject(InputService).initialize();
+  }
 }
