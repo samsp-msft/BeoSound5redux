@@ -52,7 +52,7 @@ import { NavService } from './nav.service';
       height: 768px;
       overflow: hidden;
       background: #000;
-      background: radial-gradient(circle at 1136px 384px, #111 0%, #000 70%);
+      background: radial-gradient(circle at 924px 384px, #111 0%, #000 70%);
       font-family: 'Beo', sans-serif;
     }
 
@@ -67,7 +67,7 @@ import { NavService } from './nav.service';
 
     .root-menu-container {
       position: absolute;
-      left: 1136px;
+      left: 1184px; /* Center of the dial on the right */
       top: 384px;
       width: 0;
       height: 0;
@@ -76,12 +76,15 @@ import { NavService } from './nav.service';
 
     .root-item {
       position: absolute;
-      right: 950px; 
-      width: 150px;
+      left: 0; 
+      top: 0;
+      width: 300px;
+      height: 40px;
+      line-height: 40px;
+      margin-top: -20px;
       text-align: left;
       font-size: 16px;
       color: #888888;
-      transform-origin: 1050px center;
       transition: all 0.3s ease;
       white-space: nowrap;
       text-transform: uppercase;
@@ -98,7 +101,7 @@ import { NavService } from './nav.service';
     .breadcrumbs {
       position: absolute;
       top: 50%;
-      left: 200px; 
+      left: 200px; /* Offset from the root menu */
       transform: translateY(-50%);
       display: flex;
       flex-direction: column;
@@ -128,7 +131,7 @@ import { NavService } from './nav.service';
 
     .active-arc-container {
       position: absolute;
-      left: 1136px;
+      left: 1184px; /* Center of the dial on the right */
       top: 384px;
       width: 0;
       height: 0;
@@ -137,16 +140,15 @@ import { NavService } from './nav.service';
 
     .arc-item {
       position: absolute;
-      right: 0;
+      right: 0; /* Align right side of box to the translation point */
       top: 0;
-      width: 400px;
+      width: 600px;
       height: 60px;
       line-height: 60px;
       margin-top: -30px; 
       text-align: right;
       font-size: 24px;
       color: rgba(255, 255, 255, 0.3);
-      transform-origin: 400px center;
       transition: all 0.4s cubic-bezier(0.19, 1, 0.22, 1);
       white-space: nowrap;
       pointer-events: none;
@@ -170,8 +172,8 @@ export class NavStackComponent {
   navStack = this.navService.navStack;
   navSelections = this.navService.navSelections;
 
-  private angleStep = 15; // Degrees for sub-menu
-  private rootAngleStep = 5; // Degrees for root menu
+  private angleStep = 10; 
+  private rootAngleStep = 8; 
 
   breadcrumbs = computed(() => {
     const stack = this.navStack();
@@ -192,33 +194,54 @@ export class NavStackComponent {
   });
 
   menuArcPath = computed(() => {
-    // Flipped horizontally: Center is now to the LEFT of the items.
-    const cx = -800;
+    const cx = 1184;
     const cy = 384;
-    const radius = 1006; // Places arc at X=106
-    const startAngle = -15 * (Math.PI / 180);
-    const endAngle = 15 * (Math.PI / 180);
+    const radius = 260; 
+    // Arc on the left side of the circle (centered at 180 degrees)
+    const startAngle = (180 - 45) * (Math.PI / 180);
+    const endAngle = (180 + 45) * (Math.PI / 180);
     
     const x1 = cx + radius * Math.cos(startAngle);
     const y1 = cy + radius * Math.sin(startAngle);
     const x2 = cx + radius * Math.cos(endAngle);
     const y2 = cy + radius * Math.sin(endAngle);
     
-    return `M ${x1} ${y1} A ${radius} ${radius} 0 0 0 ${x2} ${y2}`;
+    return `M ${x1} ${y1} A ${radius} ${radius} 0 0 1 ${x2} ${y2}`;
   });
 
   getRootItemTransform(index: number) {
     const items = this.rootItems();
     const middleIndex = (items.length - 1) / 2;
-    const angle = (index - middleIndex) * -this.rootAngleStep;
-    return `rotate(${angle}deg)`;
+    // Reverse the visual order: index 0 (Playing) at bottom, last index (System) at top
+    const reversedIndex = (items.length - 1) - index;
+    const relativeIdx = reversedIndex - middleIndex;
+    const angle = 180 + (relativeIdx * 6); // Fixed angle based on position in list
+    const rad = angle * Math.PI / 180;
+    
+    const radius = 1144; // Radius to reach the left side from the right-hand center
+    const x = Math.cos(rad) * radius;
+    const y = Math.sin(rad) * radius;
+    
+    return `translate(${x}px, ${y}px)`;
   }
 
   getItemTransform(index: number) {
+    const items = this.activeLevelItems();
     const selectedIdx = this.activeSelection();
-    const relativeIdx = selectedIdx - index; 
-    const angle = relativeIdx * this.angleStep;
-    const radius = index === selectedIdx ? 320 : 280;
-    return `rotate(${angle}deg) translateX(-${radius}px)`;
+    
+    // Reverse visual order for items as well
+    const reversedIndex = (items.length - 1) - index;
+    const reversedSelectedIdx = (items.length - 1) - selectedIdx;
+    
+    const relativeIdx = reversedIndex - reversedSelectedIdx; 
+    const angle = 180 + (relativeIdx * this.angleStep);
+    const rad = angle * Math.PI / 180;
+    
+    const baseRadius = 320; // Moved closer to the dial
+    const radius = index === selectedIdx ? baseRadius + 20 : baseRadius;
+    const x = Math.cos(rad) * radius;
+    const y = Math.sin(rad) * radius;
+    
+    return `translate(${x}px, ${y}px)`;
   }
 }
