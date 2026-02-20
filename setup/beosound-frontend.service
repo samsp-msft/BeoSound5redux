@@ -1,0 +1,13 @@
+[Unit]
+Description=BeoSound 5 Redux Frontend UI
+After=network.target beosound-backend.service
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/BeoSound5redux/dist/beosound5redux/browser
+ExecStart=/usr/bin/npx http-server -p 4200 -a 127.0.0.1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

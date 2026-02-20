@@ -1,0 +1,14 @@
+[Unit]
+Description=BeoSound 5 Redux Backend Engine
+After=network.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/BeoSound5redux/backend
+Environment="PATH=/home/pi/BeoSound5redux/backend/.venv/bin"
+ExecStart=/home/pi/BeoSound5redux/backend/.venv/bin/python app.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
