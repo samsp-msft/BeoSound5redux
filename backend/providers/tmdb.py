@@ -6,6 +6,8 @@ from models import MenuItem, BrowseResponse
 import os
 import json
 from datetime import datetime, timedelta
+import asyncio
+from motn_service import motn_service
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -69,7 +71,13 @@ async def get_movie_root_menu():
 # --- DISCOVERY ---
 
 @router.get("/discover/{media_type}/{category}", response_model=BrowseResponse)
-async def discover_media(media_type: str, category: str, genre_id: Optional[int] = None, provider_id: Optional[int] = Query(None)):
+async def discover_media(
+    media_type: str, 
+    category: str, 
+    genre_id: Optional[int] = None, 
+    provider_id: Optional[int] = Query(None), 
+    page: int = Query(1)
+):
     url = f"{TMDB_BASE_URL}/discover/{media_type}"
     params = {
         "api_key": TMDB_API_KEY,
@@ -95,7 +103,8 @@ async def discover_media(media_type: str, category: str, genre_id: Optional[int]
     if genre_id:
         params["with_genres"] = genre_id
 
-    return await _fetch_from_tmdb(url, params, f"{media_type.upper()} | {title}", media_type)
+    # Aggregate 5 TMDB pages to get 100 items per request
+    return await _fetch_from_tmdb(url, params, f"{media_type.upper()} | {title}", media_type, page)
 
 @router.get("/provider/{provider_id}/{media_type}", response_model=BrowseResponse)
 async def get_provider_content(provider_id: int, media_type: str):
@@ -123,8 +132,6 @@ async def get_genres(media_type: str):
             ))
         return BrowseResponse(title="Genres", items=items)
 
-from motn_service import motn_service
-
 async def resolve_deep_link(media_type: str, item_id: int) -> Optional[str]:
     """
     Finds a direct Apple TV deep link by:
@@ -134,8 +141,6 @@ async def resolve_deep_link(media_type: str, item_id: int) -> Optional[str]:
     """
     _LOGGER.info(f"Resolving deep link for {media_type} {item_id}...")
     
-    # 1. Get exact title, year, and EXTERNAL IDs from TMDB
-    # We need the IMDB ID for MOTN
     tmdb_url = f"{TMDB_BASE_URL}/{media_type}/{item_id}?api_key={TMDB_API_KEY}&append_to_response=external_ids"
     
     async with httpx.AsyncClient() as client:
@@ -151,7 +156,6 @@ async def resolve_deep_link(media_type: str, item_id: int) -> Optional[str]:
             
             _LOGGER.info(f"Metadata: Title='{title}', Year='{year}', IMDB='{imdb_id}'")
 
-            # 2. Try MOTN with IMDB ID (with its built-in cache)
             if imdb_id:
                 motn_link = await motn_service.get_deep_link(media_type, imdb_id)
                 if motn_link:
@@ -175,22 +179,23 @@ async def resolve_deep_link(media_type: str, item_id: int) -> Optional[str]:
                 _LOGGER.info(f"Apple Search ('{term}'): {data.get('resultCount', 0)} results found.")
                 return data
 
-            # Fallback 1: IMDB ID
             if imdb_id:
                 apple_data = await call_apple(imdb_id)
                 if apple_data.get("resultCount", 0) > 0:
-                    return apple_data["results"][0].get("trackViewUrl")
+                    deeplink = apple_data["results"][0].get("trackViewUrl")
+                    _LOGGER.info(f"Found Apple deep link via IMDB: {deeplink}")
+                    return deeplink
 
-            # Fallback 2: Title + Year
             apple_data = await call_apple(f"{title} {year}")
             if apple_data.get("resultCount", 0) > 0:
-                return apple_data["results"][0].get("trackViewUrl")
+                deeplink = apple_data["results"][0].get("trackViewUrl")
+                _LOGGER.info(f"Found Apple deep link via Title+Year: {deeplink}")
+                return deeplink
             
-            # Fallback 3: Title Only
             apple_data = await call_apple(title)
             if apple_data.get("resultCount", 0) > 0:
                 deeplink = apple_data["results"][0].get("trackViewUrl")
-                _LOGGER.info(f"Found Apple deep link: {deeplink}")
+                _LOGGER.info(f"Found Apple deep link via Title: {deeplink}")
                 return deeplink
 
             _LOGGER.warning(f"No direct Apple link found for {title}. Returning title search fallback.")
@@ -202,29 +207,58 @@ async def resolve_deep_link(media_type: str, item_id: int) -> Optional[str]:
 
 # --- HELPER ---
 
-async def _fetch_from_tmdb(url: str, params: dict, title: str, default_media_type: str):
+async def _fetch_from_tmdb(url: str, params: dict, title: str, default_media_type: str, internal_page: int = 1):
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.get(url, params=params)
-            response.raise_for_status()
-            data = response.json()
-            
             items = []
-            for item in data.get("results", []):
-                media_type = item.get('media_type', default_media_type)
-                media_label = "MOVIE" if media_type == "movie" else "TV"
-                year = item.get("release_date", item.get("first_air_date", ""))[:4]
-                
-                items.append(MenuItem(
-                    id=f"tmdb_{item['id']}",
-                    label=item.get("title") or item.get("name"),
-                    subText=f"{media_label} | {year}" if year else media_label,
-                    thumbnail=f"{IMAGE_BASE_URL}{item.get('poster_path')}" if item.get('poster_path') else None,
-                    childrenLink=f"/browse/tv/detail/{media_type}/{item['id']}",
-                    actionLink=f"/action/atv/play/{media_type}/{item['id']}"
-                ))
+            total_results = 0
             
-            return BrowseResponse(title=title, items=items)
+            # TMDB returns 20 items per page. User wants 100 per internal page.
+            # Internal page 1 = TMDB 1-5, Internal page 2 = TMDB 6-10, etc.
+            start_tmdb_page = (internal_page - 1) * 5 + 1
+            
+            tasks = []
+            for i in range(5):
+                p = params.copy()
+                p["page"] = start_tmdb_page + i
+                tasks.append(client.get(url, params=p))
+            
+            responses = await asyncio.gather(*tasks)
+            
+            # Get max total pages among all responses to be safe
+            max_tmdb_total_pages = 0
+            
+            for response in responses:
+                if response.status_code != 200: continue
+                
+                data = response.json()
+                total_results = max(total_results, data.get("total_results", 0))
+                max_tmdb_total_pages = max(max_tmdb_total_pages, data.get("total_pages", 0))
+                
+                for item in data.get("results", []):
+                    media_type = item.get('media_type', default_media_type)
+                    media_label = "MOVIE" if media_type == "movie" else "TV"
+                    year = item.get("release_date", item.get("first_air_date", ""))[:4]
+                    
+                    items.append(MenuItem(
+                        id=f"tmdb_{item['id']}",
+                        label=item.get("title") or item.get("name"),
+                        subText=f"{media_label} | {year}" if year else media_label,
+                        thumbnail=f"{IMAGE_BASE_URL}{item.get('poster_path')}" if item.get('poster_path') else None,
+                        childrenLink=f"/browse/tv/detail/{media_type}/{item['id']}",
+                        actionLink=f"/action/atv/play/{media_type}/{item['id']}"
+                    ))
+            
+            # Internal total pages is TMDB total pages divided by 5
+            internal_total_pages = (max_tmdb_total_pages // 5) + (1 if max_tmdb_total_pages % 5 > 0 else 0)
+            
+            return BrowseResponse(
+                title=title, 
+                items=items,
+                page=internal_page,
+                totalPages=internal_total_pages,
+                totalItems=total_results
+            )
         except Exception as e:
             _LOGGER.error(f"TMDB Fetch Error: {e}")
             raise HTTPException(status_code=500, detail=str(e))

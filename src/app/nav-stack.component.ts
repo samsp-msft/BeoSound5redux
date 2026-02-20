@@ -14,6 +14,19 @@ import { NavService } from './nav.service';
         <path [attr.d]="menuArcPath()" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1.5" />
       </svg>
 
+      <!-- Decorative Root Arc -->
+      <svg width="1024" height="768" style="position: absolute; z-index: 90; pointer-events: none; transition: none; display: block; opacity: 1; transform: translateX(0px);">
+          <defs>
+              <linearGradient id="gradient" gradientTransform="rotate(90)">
+                  <stop offset="0%" stop-color="rgba(102,153,255,0)"></stop>
+                  <stop offset="5%" stop-color="rgba(102,153,255,1)"></stop>
+                  <stop offset="95%" stop-color="rgba(0,255,204,1)"></stop>
+                  <stop offset="100%" stop-color="rgba(0,255,204,0)"></stop>
+              </linearGradient>
+          </defs>
+          <path id="mainArc" fill="none" stroke="url(#gradient)" stroke-width="3" stroke-linecap="round" d="M 219.81614543321257 12.393406584087984 A 1000 1000 0 0 0 219.81614543321268 761.6065934159122"></path>
+      </svg>
+
       <!-- Root Menu (Laser Pointer Menu) -->
       <div class="root-menu-container">
         <div *ngFor="let item of rootItems(); let i = index" 
@@ -36,12 +49,17 @@ import { NavService } from './nav.service';
 
       <!-- Active Arc Container (Sub-navigation) -->
       <div class="active-arc-container">
-        <div *ngFor="let item of activeLevelItems(); let i = index"
+        <div *ngFor="let v of virtualizedItems()"
              class="arc-item"
-             [class.selected]="i === activeSelection()"
-             [style.transform]="getItemTransform(i)">
-          {{ item.label }}
+             [class.selected]="v.index === activeSelection()"
+             [style.transform]="getItemTransform(v.index)">
+          {{ v.item.label }}
         </div>
+      </div>
+
+      <!-- Selection Preview (Absolute positioned) -->
+      <div class="selection-preview" *ngIf="selectedItemThumbnail()">
+        <img [src]="selectedItemThumbnail()" alt="">
       </div>
     </div>
   `,
@@ -53,7 +71,7 @@ import { NavService } from './nav.service';
       overflow: hidden;
       background: #000;
       background: radial-gradient(circle at 924px 384px, #111 0%, #000 70%);
-      font-family: 'Beo', sans-serif;
+      font-family: 'Monserrat', sans-serif;
     }
 
     .nav-svg {
@@ -76,25 +94,28 @@ import { NavService } from './nav.service';
 
     .root-item {
       position: absolute;
-      left: 0; 
+      right: 0; 
       top: 0;
       width: 300px;
       height: 40px;
       line-height: 40px;
       margin-top: -20px;
-      text-align: left;
-      font-size: 16px;
+      text-align: right;
+      font-size: 15px;
       color: #888888;
       transition: all 0.3s ease;
       white-space: nowrap;
       text-transform: uppercase;
       letter-spacing: 2px;
+      font-weight: 200;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .root-item.selected {
       color: #fff;
-      font-size: 20px;
-      font-weight: 600;
+      font-size: 16px;
+      font-weight: 200;
       opacity: 1;
     }
 
@@ -142,25 +163,47 @@ import { NavService } from './nav.service';
       position: absolute;
       right: 0; /* Align right side of box to the translation point */
       top: 0;
-      width: 600px;
-      height: 60px;
+      width: 300px;
+      height: 50px;
       line-height: 60px;
       margin-top: -30px; 
       text-align: right;
-      font-size: 24px;
+      font-size: 16px;
       color: rgba(255, 255, 255, 0.3);
       transition: all 0.4s cubic-bezier(0.19, 1, 0.22, 1);
       white-space: nowrap;
       pointer-events: none;
       text-transform: uppercase;
-      letter-spacing: 1px;
+      letter-spacing: 0.5px;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .arc-item.selected {
       color: #fff;
-      font-size: 30px;
-      letter-spacing: 3px;
+      font-size: 18px;
+      letter-spacing: 1px;
       text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
+    }
+
+    .selection-preview {
+      position: absolute;
+      left: 220px;
+      top: 100px;
+      width: 120px;
+      height: 180px;
+      z-index: 5;
+      border-radius: 4px;
+      overflow: hidden;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.8);
+      background: #111;
+      transition: all 0.5s ease;
+    }
+
+    .selection-preview img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
     }
   `]
 })
@@ -172,7 +215,7 @@ export class NavStackComponent {
   navStack = this.navService.navStack;
   navSelections = this.navService.navSelections;
 
-  private angleStep = 10; 
+  private angleStep = 12; 
   private rootAngleStep = 8; 
 
   breadcrumbs = computed(() => {
@@ -193,13 +236,30 @@ export class NavStackComponent {
     return selections.length > 0 ? selections[selections.length - 1] : -1;
   });
 
+  selectedItemThumbnail = computed(() => {
+    const items = this.activeLevelItems();
+    const idx = this.activeSelection();
+    return (idx !== -1 && items[idx]) ? items[idx].thumbnail : null;
+  });
+
+  virtualizedItems = computed(() => {
+    const items = this.activeLevelItems();
+    const selectedIdx = this.activeSelection();
+    if (selectedIdx === -1) return [];
+
+    const start = Math.max(0, selectedIdx - 6);
+    const end = Math.min(items.length, selectedIdx + 7);
+
+    return items.slice(start, end).map((item, i) => ({ item, index: start + i }));
+  });
+
   menuArcPath = computed(() => {
     const cx = 1184;
     const cy = 384;
     const radius = 260; 
     // Arc on the left side of the circle (centered at 180 degrees)
-    const startAngle = (180 - 45) * (Math.PI / 180);
-    const endAngle = (180 + 45) * (Math.PI / 180);
+    const startAngle = (180 - 60) * (Math.PI / 180);
+    const endAngle = (180 + 60) * (Math.PI / 180);
     
     const x1 = cx + radius * Math.cos(startAngle);
     const y1 = cy + radius * Math.sin(startAngle);
@@ -218,7 +278,7 @@ export class NavStackComponent {
     const angle = 180 + (relativeIdx * 6); // Fixed angle based on position in list
     const rad = angle * Math.PI / 180;
     
-    const radius = 1144; // Radius to reach the left side from the right-hand center
+    const radius = 1060; // Radius to reach the left side from the right-hand center
     const x = Math.cos(rad) * radius;
     const y = Math.sin(rad) * radius;
     

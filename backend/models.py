@@ -14,3 +14,6 @@ class BrowseResponse(BaseModel):
     title: str
     viewType: str = "ARC_LIST"
     items: List[MenuItem]
+    page: int = 1
+    totalPages: int = 1
+    totalItems: Optional[int] = None
