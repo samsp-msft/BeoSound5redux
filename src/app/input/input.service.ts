@@ -11,9 +11,15 @@ export class InputService {
 
   public initialize(): void {
     if (this.isBrowser) {
-      window.addEventListener('keydown', this.onKeyDown.bind(this));
-      // The wheel event was on the nav-container, we'll attach it to the window for now
-      window.addEventListener('wheel', this.onWheel.bind(this), { passive: false });
+      console.log('InputService: Initializing event listeners...');
+      window.addEventListener('keydown', (e) => {
+        console.log('InputService: KeyDown event:', e.key);
+        this.onKeyDown(e);
+      });
+      window.addEventListener('wheel', (e) => {
+        console.log('InputService: Wheel event, deltaY:', e.deltaY);
+        this.onWheel(e);
+      }, { passive: false });
     }
   }
 

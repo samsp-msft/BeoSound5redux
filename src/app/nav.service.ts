@@ -1,24 +1,37 @@
 import { Injectable, signal, computed, inject } from '@angular/core';
-import { BEO_MODULES, BeoModuleConfig } from './modules/module.config';
+import { HttpClient } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
 
 export interface NavItem {
   id: string;
   label: string;
-  children?: NavItem[];
+  subText?: string;
+  thumbnail?: string;
+  template?: string;
+  childrenLink?: string;
+  actionLink?: string;
+}
+
+export interface BrowseResponse {
+    title: string;
+    viewType: string;
+    items: NavItem[];
 }
 
 @Injectable({
   providedIn: 'root'
 })
 export class NavService {
-  private modules: BeoModuleConfig[] = inject(BEO_MODULES);
-  public rootItems: NavItem[] = [];
+  private http = inject(HttpClient);
+  private backendUrl = 'http://localhost:5001';
 
+  private rootItemsSignal = signal<NavItem[]>([]);
+  public readonly rootItems = this.rootItemsSignal.asReadonly();
+  
   // The index of the selected item in the root menu (left side)
   private rootSelectionIdx = signal<number>(1); // Default to 'Music'
 
   // The stack of current navigation levels *excluding* the root.
-  // When at the very beginning, this might be empty or contain the children of the root selection.
   private stack = signal<NavItem[][]>([]);
   
   // Selection index for each level in the stack.
@@ -29,29 +42,43 @@ export class NavService {
   public readonly navSelections = this.selectionStack.asReadonly();
 
   constructor() {
-    this.rootItems = this.modules.map(m => ({ id: m.id, label: m.label }));
-    // Initialize stack with children of the default root selection
-    this.updateStackFromRoot();
+    this.initialize();
+  }
+
+  private async initialize() {
+    console.log('NavService: Initializing from Python Engine...');
+    try {
+        const roots = await firstValueFrom(this.http.get<NavItem[]>(`${this.backendUrl}/roots`));
+        this.rootItemsSignal.set(roots);
+        console.log('NavService: Root items loaded:', roots.map(i => i.label));
+        await this.updateStackFromRoot();
+    } catch (error) {
+        console.error('NavService: Failed to load roots:', error);
+    }
   }
 
   private async updateStackFromRoot() {
-    const rootModuleConfig = this.modules[this.rootSelectionIdx()];
-    const provider = await rootModuleConfig.load();
-    const children = await provider.getNavItems();
+    const rootIdx = this.rootSelectionIdx();
+    const rootItem = this.rootItems()[rootIdx];
     
-    if (children && children.length > 0) {
-      this.rootItems[this.rootSelectionIdx()].children = children;
-      this.stack.set([children]);
-      this.selectionStack.set([0]);
-    } else {
-      this.rootItems[this.rootSelectionIdx()].children = [];
-      this.stack.set([]);
-      this.selectionStack.set([]);
+    if (!rootItem || !rootItem.childrenLink) {
+        this.stack.set([]);
+        this.selectionStack.set([]);
+        return;
+    }
+
+    try {
+        console.log('NavService: Fetching level from:', rootItem.childrenLink);
+        const response = await firstValueFrom(this.http.get<BrowseResponse>(`${this.backendUrl}${rootItem.childrenLink}`));
+        this.stack.set([response.items]);
+        this.selectionStack.set([0]);
+    } catch (error) {
+        console.error('NavService: Error updating stack from root:', error);
     }
   }
 
   setRootSelection(index: number) {
-    if (index >= 0 && index < this.rootItems.length) {
+    if (index >= 0 && index < this.rootItems().length) {
       this.rootSelectionIdx.set(index);
       this.updateStackFromRoot();
     }
@@ -60,7 +87,7 @@ export class NavService {
   moveRootSelection(delta: number) {
     let next = this.rootSelectionIdx() + delta;
     if (next < 0) next = 0;
-    if (next >= this.rootItems.length) next = this.rootItems.length - 1;
+    if (next >= this.rootItems().length) next = this.rootItems().length - 1;
     this.setRootSelection(next);
   }
 
@@ -84,7 +111,7 @@ export class NavService {
     }
   }
 
-  navigateIn() {
+  async navigateIn() {
     const currentStack = this.stack();
     if (currentStack.length === 0) return;
 
@@ -93,9 +120,25 @@ export class NavService {
     const activeIdx = currentSelections[activeLevel];
     const selectedItem = currentStack[activeLevel][activeIdx];
 
-    if (selectedItem.children && selectedItem.children.length > 0) {
-      this.stack.set([...currentStack, selectedItem.children].slice(-5));
-      this.selectionStack.set([...currentSelections, 0]);
+    if (selectedItem.actionLink) {
+        console.log('NavService: Executing action:', selectedItem.actionLink);
+        try {
+            await firstValueFrom(this.http.post(`${this.backendUrl}${selectedItem.actionLink}`, {}));
+        } catch (error) {
+            console.error('NavService: Action failed:', error);
+        }
+        return;
+    }
+
+    if (selectedItem.childrenLink) {
+        try {
+            console.log('NavService: Navigating into:', selectedItem.childrenLink);
+            const response = await firstValueFrom(this.http.get<BrowseResponse>(`${this.backendUrl}${selectedItem.childrenLink}`));
+            this.stack.set([...currentStack, response.items].slice(-5));
+            this.selectionStack.set([...currentSelections, 0]);
+        } catch (error) {
+            console.error('NavService: Navigation failed:', error);
+        }
     }
   }
 

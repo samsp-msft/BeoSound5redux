@@ -16,7 +16,7 @@ import { NavService } from './nav.service';
 
       <!-- Root Menu (Laser Pointer Menu) -->
       <div class="root-menu-container">
-        <div *ngFor="let item of rootItems; let i = index" 
+        <div *ngFor="let item of rootItems(); let i = index" 
              class="root-item"
              [class.selected]="i === rootSelectionIdx()"
              [style.transform]="getRootItemTransform(i)">
@@ -181,7 +181,9 @@ export class NavStackComponent {
 
   activeLevelItems = computed(() => {
     const stack = this.navStack();
-    return stack.length > 0 ? stack[stack.length - 1] : [];
+    const items = stack.length > 0 ? stack[stack.length - 1] : [];
+    console.log('NavStackComponent: Rendering', items.length, 'items at stack level', stack.length);
+    return items;
   });
 
   activeSelection = computed(() => {
@@ -206,7 +208,8 @@ export class NavStackComponent {
   });
 
   getRootItemTransform(index: number) {
-    const middleIndex = (this.rootItems.length - 1) / 2;
+    const items = this.rootItems();
+    const middleIndex = (items.length - 1) / 2;
     const angle = (index - middleIndex) * -this.rootAngleStep;
     return `rotate(${angle}deg)`;
   }
