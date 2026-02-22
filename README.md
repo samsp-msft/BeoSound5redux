@@ -57,3 +57,20 @@ Angular CLI does not come with an end-to-end testing framework by default. You c
 ## Additional Resources
 
 For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+
+# Python backend
+
+  To start the backend from a fresh terminal instance, navigate to the backend directory and run the
+  application using the python executable within the virtual environment:
+
+   1 cd backend
+   2 ./.venv/bin/python3 app.py
+
+
+  This ensures you are using the correct dependencies installed in the virtual environment without needing to
+  manually activate it. Alternatively, if you prefer to activate the environment first:
+
+
+   1 cd backend
+   2 source .venv/bin/activate
+   3 python3 app.py

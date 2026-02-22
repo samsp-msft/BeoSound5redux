@@ -40,7 +40,11 @@ class AppleTVService:
 
         try:
             _LOGGER.info(f"Scanning for Apple TV: {atv_id}...")
-            discovered = await pyatv.scan(asyncio.get_event_loop(), timeout=10)
+            # Scan specifically for the known IP to be faster and more reliable
+            atv_address = self.config.get("atv_address")
+            hosts = [atv_address] if atv_address else None
+            
+            discovered = await pyatv.scan(asyncio.get_event_loop(), timeout=5, hosts=hosts)
             target = next((d for d in discovered if atv_id in (d.identifier, d.address, d.name)), None)
 
             if not target:
@@ -48,7 +52,7 @@ class AppleTVService:
                 self.status = "failed"
                 return
 
-            # Apply credentials
+            # Apply credentials for all supported protocols found in config
             for protocol_str, creds in credentials.items():
                 try:
                     proto = Protocol[protocol_str]
@@ -60,7 +64,7 @@ class AppleTVService:
             _LOGGER.info(f"Connecting to {target.name}...")
             self.atv = await pyatv.connect(target, asyncio.get_event_loop())
             self.status = "ready"
-            _LOGGER.info(f"Apple TV {target.name} is READY")
+            _LOGGER.info(f"Apple TV {target.name} is READY (Protocols: {[s.protocol.name for s in target.services if s.protocol in [Protocol.Companion, Protocol.AirPlay, Protocol.RAOP, Protocol.MRP]]})")
             
         except Exception as e:
             _LOGGER.error(f"Failed to connect to Apple TV: {e}")
@@ -100,9 +104,56 @@ class AppleTVService:
             _LOGGER.error(f"Failed to launch app: {e}")
             return False
 
-# Global instance
-atv_service = AppleTVService()
-
+    async def get_now_playing(self):
+        """Returns metadata about the currently playing media, active app, and artwork."""
+        if self.status != "ready" or not self.atv:
+            return None
+        
+        try:
+            playing = await self.atv.metadata.playing()
+            _LOGGER.debug(f"Raw playing metadata: {playing}")
+            
+            # 1. Determine App Name
+            app_name = "Home"
+            try:
+                # Try metadata facade first
+                app = self.atv.metadata.app
+                if app:
+                    # App object usually has 'name' attribute
+                    app_name = getattr(app, 'name', str(app))
+            except:
+                # Fallback to checking playing object
+                if hasattr(playing, 'app') and playing.app:
+                    app_name = getattr(playing.app, 'name', str(playing.app))
+            
+            # Clean up app name if it's like "App: HBO Max"
+            if app_name.startswith("App: "):
+                app_name = app_name[5:]
+                
+            # Attach app name
+            setattr(playing, 'app', app_name)
+            _LOGGER.info(f"Now Playing: {playing.title} on {app_name}")
+            
+            # 2. Fetch Artwork
+            artwork_data = None
+            try:
+                artwork = await self.atv.metadata.artwork()
+                if artwork:
+                    # Convert to base64 for the frontend
+                    import base64
+                    encoded = base64.b64encode(artwork.data).decode('utf-8')
+                    artwork_data = f"data:{artwork.mimetype};base64,{encoded}"
+                    _LOGGER.debug(f"Retrieved artwork: {len(artwork.data)} bytes")
+            except Exception as e:
+                _LOGGER.debug(f"Failed to fetch artwork: {e}")
+                pass
+                
+            setattr(playing, 'artwork_url', artwork_data)
+            
+            return playing
+        except Exception as e:
+            _LOGGER.error(f"Failed to get now playing metadata: {e}")
+            return None
 
 # Global instance
 atv_service = AppleTVService()

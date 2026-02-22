@@ -1,6 +1,6 @@
 import { Component, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { NavService } from './nav.service';
+import { NavService, NavItem } from './nav.service';
 
 @Component({
   selector: 'app-nav-stack',
@@ -11,7 +11,7 @@ import { NavService } from './nav.service';
       <!-- Background curve -->
       <svg class="nav-svg" viewBox="0 0 1024 768">
         <!-- Root Menu Orbital Arc (Flipped horizontally to bow towards items) -->
-        <path [attr.d]="menuArcPath()" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1.5" />
+        <!--<path [attr.d]="menuArcPath()" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1.5" />-->
       </svg>
 
       <!-- Decorative Root Arc -->
@@ -41,14 +41,14 @@ import { NavService } from './nav.service';
       <div class="breadcrumbs">
         <div *ngFor="let level of breadcrumbs(); let i = index" 
              class="breadcrumb-item"
-             [style.left.px]="i * 60"
+             [style.left.px]="i * 40"
              [style.opacity]="1 - (breadcrumbs().length - 1 - i) * 0.2">
           {{ level.label }}
         </div>
       </div>
 
       <!-- Active Arc Container (Sub-navigation) -->
-      <div class="active-arc-container">
+      <div class="active-arc-container" *ngIf="activeViewType() !== 'NOW_PLAYING'">
         <div *ngFor="let v of virtualizedItems()"
              class="arc-item"
              [class.selected]="v.index === activeSelection()"
@@ -57,8 +57,25 @@ import { NavService } from './nav.service';
         </div>
       </div>
 
+      <!-- Now Playing View -->
+      <div class="now-playing-view" *ngIf="activeViewType() === 'NOW_PLAYING'">
+        <div class="np-artwork-container" *ngIf="nowPlayingPortrait()">
+          <img [src]="nowPlayingPortrait()" class="np-portrait-art" alt="">
+          <div class="np-artwork-shadow"></div>
+        </div>
+        
+        <div class="now-playing-content" *ngIf="nowPlayingItem() as item">
+          <div class="np-metadata">
+            <div class="np-title">{{ item.label }}</div>
+            <div class="np-subtext">{{ item.subText }}</div>
+            <div class="np-description" *ngIf="item.description">{{ item.description }}</div>
+            <div class="np-app" *ngIf="activeLevelData()?.currentApp">{{ activeLevelData()?.currentApp }}</div>
+          </div>
+        </div>
+      </div>
+
       <!-- Selection Preview (Absolute positioned) -->
-      <div class="selection-preview" *ngIf="selectedItemThumbnail()">
+      <div class="selection-preview" *ngIf="selectedItemThumbnail() && activeViewType() !== 'NOW_PLAYING'">
         <img [src]="selectedItemThumbnail()" alt="">
       </div>
     </div>
@@ -123,7 +140,7 @@ import { NavService } from './nav.service';
       position: absolute;
       top: 50%;
       left: 200px; /* Offset from the root menu */
-      transform: translateY(-50%);
+      //transform: translateY(-50%);
       display: flex;
       flex-direction: column;
       gap: 30px;
@@ -183,15 +200,15 @@ import { NavService } from './nav.service';
       color: #fff;
       font-size: 18px;
       letter-spacing: 1px;
-      text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
+      text-shadow: 0 0 6px rgba(255, 255, 255, 0.5);
     }
 
     .selection-preview {
       position: absolute;
-      left: 220px;
-      top: 100px;
-      width: 120px;
-      height: 180px;
+      left: 300px;
+      top: 50px;
+      width: 200px;
+      height: 300px;
       z-index: 5;
       border-radius: 4px;
       overflow: hidden;
@@ -205,6 +222,101 @@ import { NavService } from './nav.service';
       height: 100%;
       object-fit: cover;
     }
+
+    /* Now Playing Redesign */
+    .now-playing-view {
+      position: absolute;
+      left: 250px;
+      top: 50%;
+      width: 600px;
+      height: 550px;
+      transform: translateY(-50%);
+      display: flex;
+      align-items: center;
+      gap: 50px;
+      z-index: 100;
+      animation: fadeIn 0.8s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-48%); }
+      to { opacity: 1; transform: translateY(-50%); }
+    }
+
+    .np-artwork-container {
+      position: relative;
+      flex-shrink: 0;
+      width: 360px;
+      height: 540px;
+      box-shadow: 0 30px 60px rgba(0,0,0,0.8);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .np-portrait-art {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .np-artwork-shadow {
+      position: absolute;
+      inset: 0;
+      box-shadow: inset 0 0 100px rgba(0,0,0,0.4);
+      pointer-events: none;
+    }
+
+    .now-playing-content {
+      flex-grow: 1;
+      text-align: left;
+    }
+
+    .np-metadata {
+      max-width: 450px;
+    }
+
+    .np-title {
+      font-size: 42px;
+      font-weight: 200;
+      color: #fff;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 3px;
+      line-height: 1.1;
+    }
+
+    .np-subtext {
+      font-size: 18px;
+      color: #6699ff; /* Accent color from BeoSound theme */
+      font-weight: 200;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      margin-bottom: 24px;
+    }
+
+    .np-description {
+      font-size: 15px;
+      color: #999;
+      line-height: 1.6;
+      margin-bottom: 30px;
+      font-weight: 300;
+      display: -webkit-box;
+      -webkit-line-clamp: 6;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .np-app {
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      padding: 6px 16px;
+      display: inline-block;
+      border-radius: 20px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
   `]
 })
 export class NavStackComponent {
@@ -213,10 +325,33 @@ export class NavStackComponent {
   rootItems = this.navService.rootItems;
   rootSelectionIdx = this.navService.rootSelection;
   navStack = this.navService.navStack;
+  navStackData = this.navService.navStackData;
   navSelections = this.navService.navSelections;
 
   private angleStep = 12; 
   private rootAngleStep = 8; 
+
+  activeLevelData = computed(() => {
+    const stack = this.navStackData();
+    return stack.length > 0 ? stack[stack.length - 1] : null;
+  });
+
+  activeViewType = computed(() => {
+    return this.activeLevelData()?.viewType || 'ARC_LIST';
+  });
+
+  nowPlayingItem = computed(() => {
+    const data = this.activeLevelData();
+    if (data?.viewType === 'NOW_PLAYING' && data.items.length > 0) {
+      return data.items[0];
+    }
+    return null;
+  });
+
+  nowPlayingPortrait = computed(() => {
+    const item = this.nowPlayingItem();
+    return item?.images?.portrait_large || item?.images?.landscape_large || null;
+  });
 
   breadcrumbs = computed(() => {
     const stack = this.navStack();
@@ -237,9 +372,15 @@ export class NavStackComponent {
   });
 
   selectedItemThumbnail = computed(() => {
+    const npItem = this.nowPlayingItem();
+    if (npItem) {
+      return npItem.images?.portrait_large || null;
+    }
+    
     const items = this.activeLevelItems();
     const idx = this.activeSelection();
-    return (idx !== -1 && items[idx]) ? items[idx].thumbnail : null;
+    const item = (idx !== -1 && items[idx]) ? items[idx] : null;
+    return item?.images?.portrait_small || null;
   });
 
   virtualizedItems = computed(() => {
@@ -250,7 +391,7 @@ export class NavStackComponent {
     const start = Math.max(0, selectedIdx - 6);
     const end = Math.min(items.length, selectedIdx + 7);
 
-    return items.slice(start, end).map((item, i) => ({ item, index: start + i }));
+    return items.slice(start, end).map((item: NavItem, i: number) => ({ item, index: start + i }));
   });
 
   menuArcPath = computed(() => {
@@ -298,7 +439,7 @@ export class NavStackComponent {
     const rad = angle * Math.PI / 180;
     
     const baseRadius = 320; // Moved closer to the dial
-    const radius = index === selectedIdx ? baseRadius + 20 : baseRadius;
+    const radius = baseRadius; //index === selectedIdx ? baseRadius + 20 : baseRadius;
     const x = Math.cos(rad) * radius;
     const y = Math.sin(rad) * radius;
     

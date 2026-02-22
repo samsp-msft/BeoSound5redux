@@ -105,6 +105,21 @@ async def action_atv_play(media_type: str, item_id: int):
         raise HTTPException(status_code=500, detail=f"Failed to trigger playback on Apple TV (Status: {atv_service.status})")
     return {"status": "success"}
 
+@app.post("/action/atv/play_url")
+async def action_atv_play_url(url: str):
+    _LOGGER.info(f"Action: Play URL {url} on Apple TV")
+    
+    if not url:
+        raise HTTPException(status_code=400, detail="No URL provided.")
+    
+    # Map to deep link if possible
+    mapped_url = await link_mapper_service.map_to_deep_link(url)
+    
+    success = await atv_service.launch_app(mapped_url)
+    if not success:
+        raise HTTPException(status_code=500, detail=f"Failed to trigger playback on Apple TV")
+    return {"status": "success"}
+
 @sio.event
 async def connect(sid, environ):
     _LOGGER.info(f'Client connected: {sid}')

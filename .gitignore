@@ -46,6 +46,7 @@ Thumbs.db
 /backend/config.json
 /backend/.venv/
 /backend/motn_cache.json
+/backend/motn_cache/*
 __pycache__/
 *.py[cod]
 *$py.class

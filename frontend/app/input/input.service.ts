@@ -45,8 +45,10 @@ export class InputService {
         this.navService.moveSelection(1);
         break;
       case 'ArrowRight':
-      case 'Enter':
         this.navService.navigateIn();
+        break;
+      case 'Enter':
+        this.navService.activate();
         break;
       case 'ArrowLeft':
       case 'Backspace': // Corrected from BackSpace

@@ -2,12 +2,13 @@ from fastapi import APIRouter, HTTPException, Query
 import httpx
 import logging
 from typing import List, Optional
-from models import MenuItem, BrowseResponse
+from models import MenuItem, BrowseResponse, ImageSet
 import os
 import json
 from datetime import datetime, timedelta
 import asyncio
 from motn_service import motn_service
+from tmdb_service import tmdb_service
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -24,7 +25,6 @@ SUBSCRIPTIONS = config.get('subscriptions', [])
 PROVIDER_IDS = "|".join([str(s['id']) for s in SUBSCRIPTIONS])
 
 TMDB_BASE_URL = "https://api.themoviedb.org/3"
-IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w200"
 
 # --- ROOT GENERATORS ---
 
@@ -83,7 +83,8 @@ async def discover_media(
         "api_key": TMDB_API_KEY,
         "watch_region": WATCH_REGION,
         "with_watch_providers": str(provider_id) if provider_id else PROVIDER_IDS,
-        "with_watch_monetization_types": "flatrate"
+        "with_watch_monetization_types": "flatrate|ads|free",
+        "include_null_first_air_dates" : "true"
     }
 
     title = category.replace("_", " ").title()
@@ -91,8 +92,8 @@ async def discover_media(
     if category == "trending":
         url = f"{TMDB_BASE_URL}/trending/{media_type}/week"
     elif category == "new":
-        one_month_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
-        params["first_air_date.gte" if media_type == "tv" else "primary_release_date.gte"] = one_month_ago
+        three_month_ago = (datetime.now() - timedelta(days=90)).strftime('%Y-%m-%d')
+        params["first_air_date.gte" if media_type == "tv" else "primary_release_date.gte"] = three_month_ago
         params["sort_by"] = "popularity.desc"
     elif category == "airing":
         url = f"{TMDB_BASE_URL}/tv/airing_today"
@@ -106,6 +107,55 @@ async def discover_media(
     # Aggregate 5 TMDB pages to get 100 items per request
     return await _fetch_from_tmdb(url, params, f"{media_type.upper()} | {title}", media_type, page)
 
+@router.get("/episodes/{tmdb_id}", response_model=BrowseResponse)
+async def get_episodes(tmdb_id: str):
+    # First, we need to get the IMDB ID from TMDB
+    url = f"{TMDB_BASE_URL}/tv/{tmdb_id}"
+    params = {
+        "api_key": TMDB_API_KEY,
+        "append_to_response": "external_ids"
+    }
+    
+    async with httpx.AsyncClient() as client:
+        tmdb_data = await tmdb_service.get(url, params=params, client=client)
+        if not tmdb_data:
+            raise HTTPException(status_code=404, detail="TMDB data not found for this show")
+        
+        imdb_id = tmdb_data.get("external_ids", {}).get("imdb_id")
+        if not imdb_id:
+            raise HTTPException(status_code=404, detail="IMDB ID not found for this show")
+
+        data = await motn_service.get_show_data(imdb_id)
+        if not data:
+            raise HTTPException(status_code=404, detail="Show data not found in MOTN")
+        
+        title = data.get("title", "Episodes")
+        items = []
+        
+        # Iterate through seasons and episodes
+        seasons = data.get("seasons", [])
+        for season in seasons:
+            s_num = season.get("seasonNumber") or (seasons.index(season) + 1)
+            
+            episodes = season.get("episodes", [])
+            for episode in episodes:
+                e_num = episode.get("episodeNumber") or (episodes.index(episode) + 1)
+                
+                # Format: s3e2 Title
+                label = f"s{s_num}e{e_num} {episode.get('title', 'Untitled')}"
+                
+                # Extract the best link for this specific episode
+                video_url = motn_service._extract_best_link(episode) or motn_service._extract_best_link(season) or motn_service._extract_best_link(data)
+
+                items.append(MenuItem(
+                    id=f"ep_{imdb_id}_{s_num}_{e_num}",
+                    label=label,
+                    subText=episode.get("overview")[:100] + "..." if episode.get("overview") else None,
+                    actionLink=f"/action/atv/play_url?url={video_url}" if video_url else None
+                ))
+                
+        return BrowseResponse(title=f"{title} - Episodes", items=items)
+
 @router.get("/provider/{provider_id}/{media_type}", response_model=BrowseResponse)
 async def get_provider_content(provider_id: int, media_type: str):
     provider_name = next((s['name'] for s in SUBSCRIPTIONS if s['id'] == provider_id), "Provider")
@@ -113,24 +163,38 @@ async def get_provider_content(provider_id: int, media_type: str):
         title=provider_name,
         items=[
             MenuItem(id="p_new", label="New", childrenLink=f"/browse/tv/discover/{media_type}/new?provider_id={provider_id}"),
-            MenuItem(id="p_trending", label="Trending", childrenLink=f"/browse/tv/discover/{media_type}/trending?provider_id={provider_id}")
+            MenuItem(id="p_trending", label="Trending", childrenLink=f"/browse/tv/discover/{media_type}/trending?provider_id={provider_id}"),
+            MenuItem(id="p_genres", label="Genres", childrenLink=f"/browse/tv/genres/{media_type}?provider_id={provider_id}")
         ]
     )
 
 @router.get("/genres/{media_type}", response_model=BrowseResponse)
-async def get_genres(media_type: str):
+async def get_genres(media_type: str, provider_id: Optional[int] = Query(None)):
     url = f"{TMDB_BASE_URL}/genre/{media_type}/list?api_key={TMDB_API_KEY}"
+    
+    provider_name = ""
+    if provider_id:
+        provider_name = next((s['name'] for s in SUBSCRIPTIONS if s['id'] == provider_id), "")
+    
+    title = f"{provider_name} Genres" if provider_name else "Genres"
+
     async with httpx.AsyncClient() as client:
-        response = await client.get(url)
-        data = response.json()
+        data = await tmdb_service.get(url, client=client)
+        if not data:
+            raise HTTPException(status_code=500, detail="Failed to fetch genres from TMDB")
+        
         items = []
         for g in data.get("genres", []):
+            link = f"/browse/tv/discover/{media_type}/genre_list?genre_id={g['id']}"
+            if provider_id:
+                link += f"&provider_id={provider_id}"
+                
             items.append(MenuItem(
                 id=f"genre_{g['id']}", 
                 label=g['name'], 
-                childrenLink=f"/browse/tv/discover/{media_type}/genre_list?genre_id={g['id']}"
+                childrenLink=link
             ))
-        return BrowseResponse(title="Genres", items=items)
+        return BrowseResponse(title=title, items=items)
 
 async def resolve_deep_link(media_type: str, item_id: int) -> Optional[str]:
     """
@@ -141,13 +205,17 @@ async def resolve_deep_link(media_type: str, item_id: int) -> Optional[str]:
     """
     _LOGGER.info(f"Resolving deep link for {media_type} {item_id}...")
     
-    tmdb_url = f"{TMDB_BASE_URL}/{media_type}/{item_id}?api_key={TMDB_API_KEY}&append_to_response=external_ids"
+    tmdb_url = f"{TMDB_BASE_URL}/{media_type}/{item_id}"
+    params = {
+        "api_key": TMDB_API_KEY,
+        "append_to_response": "external_ids"
+    }
     
     async with httpx.AsyncClient() as client:
         try:
-            tmdb_res = await client.get(tmdb_url)
-            tmdb_res.raise_for_status()
-            metadata = tmdb_res.json()
+            metadata = await tmdb_service.get(tmdb_url, params=params, client=client)
+            if not metadata:
+                raise Exception("Failed to fetch metadata from TMDB")
             
             title = metadata.get("title") or metadata.get("name")
             date = metadata.get("release_date") or metadata.get("first_air_date") or ""
@@ -221,17 +289,16 @@ async def _fetch_from_tmdb(url: str, params: dict, title: str, default_media_typ
             for i in range(5):
                 p = params.copy()
                 p["page"] = start_tmdb_page + i
-                tasks.append(client.get(url, params=p))
+                tasks.append(tmdb_service.get(url, params=p, client=client))
             
-            responses = await asyncio.gather(*tasks)
+            responses_data = await asyncio.gather(*tasks)
             
             # Get max total pages among all responses to be safe
             max_tmdb_total_pages = 0
             
-            for response in responses:
-                if response.status_code != 200: continue
+            for data in responses_data:
+                if not data: continue
                 
-                data = response.json()
                 total_results = max(total_results, data.get("total_results", 0))
                 max_tmdb_total_pages = max(max_tmdb_total_pages, data.get("total_pages", 0))
                 
@@ -240,12 +307,27 @@ async def _fetch_from_tmdb(url: str, params: dict, title: str, default_media_typ
                     media_label = "MOVIE" if media_type == "movie" else "TV"
                     year = item.get("release_date", item.get("first_air_date", ""))[:4]
                     
+                    backdrop_path = item.get('backdrop_path')
+                    poster_path = item.get('poster_path')
+                    
+                    images = ImageSet(
+                        portrait_small=f"https://image.tmdb.org/t/p/w185{poster_path}" if poster_path else None,
+                        portrait_large=f"https://image.tmdb.org/t/p/w780{poster_path}" if poster_path else None,
+                        landscape_small=f"https://image.tmdb.org/t/p/w300{backdrop_path}" if backdrop_path else None,
+                        landscape_large=f"https://image.tmdb.org/t/p/w1280{backdrop_path}" if backdrop_path else None
+                    )
+
+                    # Determine navigation
+                    children_link = None
+                    if media_type == "tv":
+                        children_link = f"/browse/tv/episodes/{item['id']}"
+
                     items.append(MenuItem(
                         id=f"tmdb_{item['id']}",
                         label=item.get("title") or item.get("name"),
                         subText=f"{media_label} | {year}" if year else media_label,
-                        thumbnail=f"{IMAGE_BASE_URL}{item.get('poster_path')}" if item.get('poster_path') else None,
-                        childrenLink=f"/browse/tv/detail/{media_type}/{item['id']}",
+                        images=images,
+                        childrenLink=children_link,
                         actionLink=f"/action/atv/play/{media_type}/{item['id']}"
                     ))
             

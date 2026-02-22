@@ -1,15 +1,26 @@
-import { Injectable, signal, computed, inject } from '@angular/core';
+import { Injectable, signal, computed, inject, PLATFORM_ID, OnDestroy } from '@angular/core';
+import { isPlatformBrowser } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
+
+export interface ImageSet {
+  portrait_small?: string;
+  portrait_large?: string;
+  landscape_small?: string;
+  landscape_large?: string;
+}
 
 export interface NavItem {
   id: string;
   label: string;
   subText?: string;
-  thumbnail?: string;
+  description?: string;
+  images?: ImageSet;
   template?: string;
   childrenLink?: string;
   actionLink?: string;
+  duration?: number;
+  position?: number;
 }
 
 export interface BrowseResponse {
@@ -19,6 +30,7 @@ export interface BrowseResponse {
     page: number;
     totalPages: number;
     totalItems?: number;
+    currentApp?: string;
 }
 
 export interface LevelData {
@@ -27,20 +39,22 @@ export interface LevelData {
     currentPage: number;
     totalPages: number;
     link: string;
+    currentApp?: string;
 }
 
 @Injectable({
   providedIn: 'root'
 })
-export class NavService {
+export class NavService implements OnDestroy {
   private http = inject(HttpClient);
+  private platformId = inject(PLATFORM_ID);
   private backendUrl = 'http://localhost:5001';
 
   private rootItemsSignal = signal<NavItem[]>([]);
   public readonly rootItems = this.rootItemsSignal.asReadonly();
   
   // The index of the selected item in the root menu (left side)
-  private rootSelectionIdx = signal<number>(1); // Default to 'Music'
+  private rootSelectionIdx = signal<number>(0); // Default to 'Playing' (usually index 0)
 
   // The stack of current navigation levels *excluding* the root.
   private stack = signal<LevelData[]>([]);
@@ -49,11 +63,23 @@ export class NavService {
   private selectionStack = signal<number[]>([]);
 
   public readonly rootSelection = this.rootSelectionIdx.asReadonly();
+  public readonly navStackData = this.stack.asReadonly();
   public readonly navStack = computed(() => this.stack().map(l => l.items));
   public readonly navSelections = this.selectionStack.asReadonly();
 
+  private pollInterval: any;
+
   constructor() {
     this.initialize();
+    if (isPlatformBrowser(this.platformId)) {
+      this.startPolling();
+    }
+  }
+
+  ngOnDestroy() {
+    if (this.pollInterval) {
+      clearInterval(this.pollInterval);
+    }
   }
 
   private async initialize() {
@@ -62,9 +88,53 @@ export class NavService {
         const roots = await firstValueFrom(this.http.get<NavItem[]>(`${this.backendUrl}/roots`));
         this.rootItemsSignal.set(roots);
         console.log('NavService: Root items loaded:', roots.map(i => i.label));
+        
+        // Find 'Playing' index
+        const playingIdx = roots.findIndex(r => r.id === 'playing_root');
+        if (playingIdx !== -1) {
+            this.rootSelectionIdx.set(playingIdx);
+        }
+
         await this.updateStackFromRoot();
     } catch (error) {
         console.error('NavService: Failed to load roots:', error);
+    }
+  }
+
+  private startPolling() {
+    // Poll for Now Playing updates every 3 seconds if we are on the playing screen
+    this.pollInterval = setInterval(async () => {
+        try {
+            const currentStack = this.stack();
+            if (currentStack.length > 0) {
+                const activeLevel = currentStack[currentStack.length - 1];
+                if (activeLevel.viewType === 'NOW_PLAYING') {
+                    await this.refreshActiveLevel();
+                }
+            }
+        } catch (e) {
+            // Ignore errors if injector is destroyed during poll
+        }
+    }, 3000);
+  }
+
+  private async refreshActiveLevel() {
+    const currentStack = this.stack();
+    const activeIdx = currentStack.length - 1;
+    const activeLevel = currentStack[activeIdx];
+
+    try {
+        const response = await firstValueFrom(this.http.get<BrowseResponse>(`${this.backendUrl}${activeLevel.link}`));
+        const newStack = [...this.stack()];
+        newStack[activeIdx] = {
+            ...activeLevel,
+            items: response.items,
+            viewType: response.viewType,
+            currentApp: response.currentApp
+        };
+        this.stack.set(newStack);
+    } catch (error) {
+        console.warn('NavService: Failed to refresh active level:', error);
     }
   }
 
@@ -165,7 +235,7 @@ export class NavService {
     }
   }
 
-  async navigateIn() {
+  async activate() {
     const currentStack = this.stack();
     if (currentStack.length === 0) return;
 
@@ -183,6 +253,19 @@ export class NavService {
         }
         return;
     }
+
+    // If no actionLink, fallback to navigateIn behavior
+    this.navigateIn();
+  }
+
+  async navigateIn() {
+    const currentStack = this.stack();
+    if (currentStack.length === 0) return;
+
+    const currentSelections = this.selectionStack();
+    const activeLevelIdx = currentStack.length - 1;
+    const activeIdx = currentSelections[activeLevelIdx];
+    const selectedItem = currentStack[activeLevelIdx].items[activeIdx];
 
     if (selectedItem.childrenLink) {
         try {
