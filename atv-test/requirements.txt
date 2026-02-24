@@ -1,2 +1,0 @@
-pyatv
-asyncio

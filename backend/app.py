@@ -41,17 +41,20 @@ app.include_router(system.router)
 from atv_service import atv_service
 from motn_service import motn_service
 from link_mapper_service import link_mapper_service
+from sonos_service import sonos_service
 
 @app.on_event("startup")
 async def startup_event():
     _LOGGER.info("Application starting up...")
     atv_service.initialize()
+    sonos_service.initialize()
 
 @app.get("/")
 async def read_root():
     return {
         "message": "BeoSound5 Engine Running (FastAPI)",
         "atv_status": atv_service.status,
+        "sonos_status": sonos_service.status,
         "motn_cache_size": len(motn_service.cache)
     }
 
@@ -59,15 +62,18 @@ async def read_root():
 async def get_atv_status():
     return {"status": atv_service.status}
 
-@app.get("/motn/status")
-async def get_motn_status():
-    return {
-        "cache_size": len(motn_service.cache)
-    }
+@app.get("/sonos/status")
+async def get_sonos_status():
+    return {"status": sonos_service.status}
 
 @app.post("/atv/rescan")
 async def rescan_atv():
     atv_service.initialize()
+    return {"status": "rescan_triggered"}
+
+@app.post("/sonos/rescan")
+async def rescan_sonos():
+    sonos_service.initialize()
     return {"status": "rescan_triggered"}
 
 @app.get("/roots", response_model=List[MenuItem])
@@ -83,6 +89,14 @@ async def get_roots():
     ]
 
 # --- ACTIONS ---
+
+@app.post("/action/music/play/{am_id:path}")
+async def action_music_play(am_id: str):
+    _LOGGER.info(f"Action: Play Apple Music {am_id} on Sonos")
+    success = await sonos_service.play_apple_music(am_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to play on Sonos")
+    return {"status": "playing", "id": am_id}
 
 @app.post("/action/atv/play/{media_type}/{item_id}")
 async def action_atv_play(media_type: str, item_id: int):
